@@ -3,7 +3,9 @@
 import tkinter as tk
 from tkinter import ttk
 import logging
-from config import UPDATE_INTERVAL_MS
+from tkinter import messagebox
+from config import UPDATE_INTERVAL_MS  # valor inicial carregado do banco
+from db import update_config_in_db  # para salvar as alterações no MongoDB
 
 class PortfolioGUI:
     """
@@ -19,6 +21,7 @@ class PortfolioGUI:
         self.root = tk.Tk()
         self.root.title("Carteira Tempo Real")
         self.root.geometry("900x600")
+        self.update_interval_ms = UPDATE_INTERVAL_MS  # atribuição inicial
         self.create_widgets()
         self.refresh()  # Atualização inicial
         self.root.mainloop()
@@ -51,6 +54,14 @@ class PortfolioGUI:
         self.header_tree.insert("", "end", iid="variacao_reais", values=("Valor da Variação total investido em Reais    :", ""))
         self.header_tree.insert("", "end", iid="dolar", values=("Valor do dólar             :", ""))
 
+        # Botão para operar (comprar/vender) ações
+        trade_button = tk.Button(self.root, text="Operar (Comprar/Vender)", command=self.open_trade_window)
+        trade_button.pack(pady=5)
+        
+        # Botão para abrir a janela de configurações
+        config_button = tk.Button(self.root, text="Configurações", command=self.open_config_window)
+        config_button.pack(pady=5)
+
         # Criação da tabela principal do portfólio
         columns = ("Ticker", "Quantidade", "Preço Médio", "Custo Médio", "Preço Atual", "Valor Atual", "Variação (%)", "Variação (US$)", "Composição (%)")
         self.tree = ttk.Treeview(self.root, columns=columns, show="headings", height=15)
@@ -60,6 +71,104 @@ class PortfolioGUI:
         self.tree.pack(expand=True, fill="both", padx=20, pady=10)
         self.tree.tag_configure("positive", foreground="green")
         self.tree.tag_configure("negative", foreground="red")
+
+    def open_config_window(self):
+        """Abre uma nova janela para alterar as configurações."""
+        config_window = tk.Toplevel(self.root)
+        config_window.title("Configurações")
+        config_window.grab_set()  # impede interação com a janela principal
+
+        # Labels e campos de entrada para cada configuração
+        tk.Label(config_window, text="Valor Inicial Total (USD):").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        entry_valor_usd = tk.Entry(config_window)
+        entry_valor_usd.insert(0, str(self.pm.valor_inicial_total))
+        entry_valor_usd.grid(row=0, column=1, padx=5, pady=5)
+
+        tk.Label(config_window, text="Valor Inicial Total (R$):").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        entry_valor_reais = tk.Entry(config_window)
+        entry_valor_reais.insert(0, str(self.pm.valor_inicial_total_reais))
+        entry_valor_reais.grid(row=1, column=1, padx=5, pady=5)
+
+        tk.Label(config_window, text="Intervalo de Atualização (ms):").grid(row=2, column=0, padx=5, pady=5, sticky="e")
+        entry_interval = tk.Entry(config_window)
+        entry_interval.insert(0, str(self.update_interval_ms))
+        entry_interval.grid(row=2, column=1, padx=5, pady=5)
+
+        def save_config():
+            try:
+                novo_valor_usd = float(entry_valor_usd.get())
+                novo_valor_reais = float(entry_valor_reais.get())
+                novo_interval = int(entry_interval.get())
+            except ValueError:
+                messagebox.showerror("Erro", "Por favor, insira valores numéricos válidos.")
+                return
+
+            # Atualiza as configurações na memória
+            self.pm.valor_inicial_total = novo_valor_usd
+            self.pm.valor_inicial_total_reais = novo_valor_reais
+            self.update_interval_ms = novo_interval
+
+            # Atualiza as configurações no banco de dados
+            new_config = {
+                "valor_inicial_total_usd": novo_valor_usd,
+                "valor_inicial_total_reais": novo_valor_reais,
+                "update_interval_ms": novo_interval
+            }
+            update_config_in_db(new_config)
+            messagebox.showinfo("Sucesso", "Configurações atualizadas com sucesso!")
+            config_window.destroy()
+
+        # Botão para salvar as configurações
+        save_button = tk.Button(config_window, text="Salvar", command=save_config)
+        save_button.grid(row=3, column=0, columnspan=2, pady=10)
+
+    def open_trade_window(self):
+        """Abre uma nova janela para operações de compra/venda de ações."""
+        trade_window = tk.Toplevel(self.root)
+        trade_window.title("Operar Ação")
+        
+        # Labels e campos de entrada
+        tk.Label(trade_window, text="Ticker (Ação):").grid(row=0, column=0, padx=5, pady=5)
+        entry_ticker = tk.Entry(trade_window)
+        entry_ticker.grid(row=0, column=1, padx=5, pady=5)
+        
+        tk.Label(trade_window, text="Quantidade:").grid(row=1, column=0, padx=5, pady=5)
+        entry_quantity = tk.Entry(trade_window)
+        entry_quantity.grid(row=1, column=1, padx=5, pady=5)
+        
+        tk.Label(trade_window, text="Preço:").grid(row=2, column=0, padx=5, pady=5)
+        entry_price = tk.Entry(trade_window)
+        entry_price.grid(row=2, column=1, padx=5, pady=5)
+        
+        # Funções para os botões de operação
+        def buy_action():
+            try:
+                ticker = entry_ticker.get().upper().strip()
+                quantity = float(entry_quantity.get())
+                price = float(entry_price.get())
+                self.pm.buy_stock(ticker, quantity, price)
+                trade_window.destroy()
+                self.refresh()  # Atualiza a interface principal
+            except Exception as e:
+                logging.error(f"Erro ao comprar: {e}")
+                messagebox.showerror("Erro", str(e))
+        
+        def sell_action():
+            try:
+                ticker = entry_ticker.get().upper().strip()
+                quantity = float(entry_quantity.get())
+                self.pm.sell_stock(ticker, quantity)
+                trade_window.destroy()
+                self.refresh()
+            except Exception as e:
+                logging.error(f"Erro ao vender: {e}")
+                messagebox.showerror("Erro", str(e))
+        
+        # Botões Comprar e Vender
+        buy_button = tk.Button(trade_window, text="Comprar", command=buy_action)
+        buy_button.grid(row=3, column=0, padx=5, pady=10)
+        sell_button = tk.Button(trade_window, text="Vender", command=sell_action)
+        sell_button.grid(row=3, column=1, padx=5, pady=10)
 
     def atualizar_header(self, total_portfolio, variacao_total, valor_variacao_total, dolar_rate, valor_investido, saldo_restante):
         """Atualiza os valores do cabeçalho na interface."""
@@ -112,5 +221,5 @@ class PortfolioGUI:
                     f"US$ {dados['custo_medio']:.2f}",
                     "-", "-", "-", "-", "-"
                 ))
-        # Agenda a próxima atualização
-        self.root.after(UPDATE_INTERVAL_MS, self.refresh)
+        # Agenda a próxima atualização utilizando o intervalo dinâmico
+        self.root.after(self.update_interval_ms, self.refresh)

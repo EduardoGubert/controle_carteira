@@ -1,3 +1,5 @@
+# main.py
+
 from config import portfolio, VALOR_INICIAL_TOTAL_USD, VALOR_INICIAL_TOTAL_REAIS
 from portfolio_manager import PortfolioManager
 from gui import PortfolioGUI

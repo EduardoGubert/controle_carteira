@@ -3,6 +3,7 @@
 import yfinance as yf
 import pandas as pd
 import logging
+from db import update_portfolio_in_db
 
 class PortfolioManager:
     """
@@ -91,3 +92,58 @@ class PortfolioManager:
         valor_variacao_total = total_portfolio - self.valor_inicial_total
 
         return total_portfolio, variacao_total, valor_variacao_total, total_investido, saldo_restante
+
+    def buy_stock(self, ticker, quantity, price):
+        """
+        Compra uma determinada quantidade de uma ação a um preço específico.
+        
+        Se a ação já existe na carteira, atualiza os valores com média ponderada.
+        Se não, adiciona a ação.
+        """
+        ticker = ticker.upper().strip()
+        if ticker in self.portfolio:
+            current_data = self.portfolio[ticker]
+            old_quantity = current_data["quantidade"]
+            old_total_cost = current_data["custo_medio"]
+            new_quantity = old_quantity + quantity
+            new_total_cost = old_total_cost + (quantity * price)
+            new_avg_price = new_total_cost / new_quantity
+            self.portfolio[ticker]["quantidade"] = new_quantity
+            self.portfolio[ticker]["preco_medio"] = new_avg_price
+            self.portfolio[ticker]["custo_medio"] = new_total_cost
+        else:
+            self.portfolio[ticker] = {
+                "quantidade": quantity,
+                "preco_medio": price,
+                "custo_medio": quantity * price
+            }
+        logging.info(f"Compra efetuada: {ticker}, Qtd: {quantity}, Preço: {price}")
+        update_portfolio_in_db(self.portfolio)
+
+    def sell_stock(self, ticker, quantity):
+        """
+        Vende (remove) uma quantidade da ação.
+        
+        Se a quantidade vendida for igual à atual, remove a ação da carteira.
+        Se for parcial, atualiza os valores proporcionalmente.
+        """
+        ticker = ticker.upper().strip()
+        if ticker not in self.portfolio:
+            raise ValueError("Ticker não encontrado na carteira")
+        current_data = self.portfolio[ticker]
+        old_quantity = current_data["quantidade"]
+        if quantity > old_quantity:
+            raise ValueError("Quantidade para vender maior que a disponível")
+        elif quantity == old_quantity:
+            del self.portfolio[ticker]
+            logging.info(f"Venda completa: {ticker} removido da carteira.")
+        else:
+            new_quantity = old_quantity - quantity
+            old_total_cost = current_data["custo_medio"]
+            new_total_cost = old_total_cost * (new_quantity / old_quantity)
+            new_avg_price = new_total_cost / new_quantity if new_quantity > 0 else 0
+            self.portfolio[ticker]["quantidade"] = new_quantity
+            self.portfolio[ticker]["preco_medio"] = new_avg_price
+            self.portfolio[ticker]["custo_medio"] = new_total_cost
+            logging.info(f"Venda parcial: {ticker}, Qtd vendida: {quantity}, Qtd restante: {new_quantity}")
+        update_portfolio_in_db(self.portfolio)
