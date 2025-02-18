@@ -1,34 +1,27 @@
-# gui.py
-
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import logging
-from tkinter import messagebox
-from config import UPDATE_INTERVAL_MS  # valor inicial carregado do banco
-from db import update_config_in_db  # para salvar as alterações no MongoDB
+from datetime import datetime
+from config import UPDATE_INTERVAL_MS
+from db import update_config_in_db
 
 class PortfolioGUI:
     """
     Interface gráfica para exibir a carteira em tempo real.
     """
     def __init__(self, portfolio_manager):
-        """
-        Inicializa a interface gráfica.
-        
-        :param portfolio_manager: instância de PortfolioManager.
-        """
         self.pm = portfolio_manager
         self.root = tk.Tk()
         self.root.title("Carteira Tempo Real")
         self.root.geometry("900x600")
-        self.update_interval_ms = UPDATE_INTERVAL_MS  # atribuição inicial
+        self.update_interval_ms = UPDATE_INTERVAL_MS  # valor inicial vindo do config
         self.create_widgets()
-        self.refresh()  # Atualização inicial
+        self.refresh()
         self.root.mainloop()
 
     def create_widgets(self):
         """Cria e configura os widgets da interface."""
-        # Frame do cabeçalho e Treeview para os dados resumidos
+        # Cabeçalho com informações resumidas
         self.header_frame = tk.Frame(self.root)
         self.header_frame.pack(pady=10)
         self.header_tree = ttk.Treeview(self.header_frame, columns=("Descricao", "Valor"), show="headings", height=10)
@@ -42,7 +35,7 @@ class PortfolioGUI:
         self.header_tree.tag_configure("positive", foreground="green")
         self.header_tree.tag_configure("negative", foreground="red")
 
-        # Inserção dos itens no cabeçalho com identificadores únicos
+        # Itens do cabeçalho
         self.header_tree.insert("", "end", iid="total", values=("Valor total da carteira (ações + saldo):", ""))
         self.header_tree.insert("", "end", iid="variacao", values=("Variação total da carteira:", ""))
         self.header_tree.insert("", "end", iid="valor_variacao", values=("Valor da Variação total da carteira:", ""))
@@ -54,7 +47,7 @@ class PortfolioGUI:
         self.header_tree.insert("", "end", iid="variacao_reais", values=("Valor da Variação total investido em Reais    :", ""))
         self.header_tree.insert("", "end", iid="dolar", values=("Valor do dólar             :", ""))
 
-        # Botão para operar (comprar/vender) ações
+        # Botão de operações (comprar/vender)
         trade_button = tk.Button(self.root, text="Operar (Comprar/Vender)", command=self.open_trade_window)
         trade_button.pack(pady=5)
         
@@ -62,7 +55,7 @@ class PortfolioGUI:
         config_button = tk.Button(self.root, text="Configurações", command=self.open_config_window)
         config_button.pack(pady=5)
 
-        # Criação da tabela principal do portfólio
+        # Tabela principal da carteira
         columns = ("Ticker", "Quantidade", "Preço Médio", "Custo Médio", "Preço Atual", "Valor Atual", "Variação (%)", "Variação (US$)", "Composição (%)")
         self.tree = ttk.Treeview(self.root, columns=columns, show="headings", height=15)
         for col in columns:
@@ -73,12 +66,11 @@ class PortfolioGUI:
         self.tree.tag_configure("negative", foreground="red")
 
     def open_config_window(self):
-        """Abre uma nova janela para alterar as configurações."""
+        """Abre uma janela para alterar as configurações."""
         config_window = tk.Toplevel(self.root)
         config_window.title("Configurações")
-        config_window.grab_set()  # impede interação com a janela principal
+        config_window.grab_set()
 
-        # Labels e campos de entrada para cada configuração
         tk.Label(config_window, text="Valor Inicial Total (USD):").grid(row=0, column=0, padx=5, pady=5, sticky="e")
         entry_valor_usd = tk.Entry(config_window)
         entry_valor_usd.insert(0, str(self.pm.valor_inicial_total))
@@ -94,40 +86,57 @@ class PortfolioGUI:
         entry_interval.insert(0, str(self.update_interval_ms))
         entry_interval.grid(row=2, column=1, padx=5, pady=5)
 
+        tk.Label(config_window, text="Data de Início da Carteira (dd/mm/yyyy):").grid(row=3, column=0, padx=5, pady=5, sticky="e")
+        entry_data_inicio = tk.Entry(config_window)
+        # Se já houver data definida, formata-a
+        if self.pm.data_inicio:
+            entry_data_inicio.insert(0, self.pm.data_inicio.strftime("%d/%m/%Y"))
+        entry_data_inicio.grid(row=3, column=1, padx=5, pady=5)
+
         def save_config():
             try:
                 novo_valor_usd = float(entry_valor_usd.get())
                 novo_valor_reais = float(entry_valor_reais.get())
                 novo_interval = int(entry_interval.get())
             except ValueError:
-                messagebox.showerror("Erro", "Por favor, insira valores numéricos válidos.")
+                messagebox.showerror("Erro", "Insira valores numéricos válidos.")
                 return
+
+            data_inicio_input = entry_data_inicio.get().strip()
+            if data_inicio_input != "":
+                try:
+                    novo_data_inicio = datetime.strptime(data_inicio_input, "%d/%m/%Y")
+                except ValueError:
+                    messagebox.showerror("Erro", "Data de Início deve estar no formato dd/mm/yyyy.")
+                    return
+            else:
+                novo_data_inicio = None
 
             # Atualiza as configurações na memória
             self.pm.valor_inicial_total = novo_valor_usd
             self.pm.valor_inicial_total_reais = novo_valor_reais
             self.update_interval_ms = novo_interval
+            self.pm.data_inicio = novo_data_inicio
 
-            # Atualiza as configurações no banco de dados
+            # Salva no MongoDB
             new_config = {
                 "valor_inicial_total_usd": novo_valor_usd,
                 "valor_inicial_total_reais": novo_valor_reais,
-                "update_interval_ms": novo_interval
+                "update_interval_ms": novo_interval,
+                "data_inicio": novo_data_inicio
             }
             update_config_in_db(new_config)
-            messagebox.showinfo("Sucesso", "Configurações atualizadas com sucesso!")
+            messagebox.showinfo("Sucesso", "Configurações atualizadas!")
             config_window.destroy()
 
-        # Botão para salvar as configurações
         save_button = tk.Button(config_window, text="Salvar", command=save_config)
-        save_button.grid(row=3, column=0, columnspan=2, pady=10)
+        save_button.grid(row=4, column=0, columnspan=2, pady=10)
 
     def open_trade_window(self):
-        """Abre uma nova janela para operações de compra/venda de ações."""
+        """Abre uma janela para operações de compra/venda."""
         trade_window = tk.Toplevel(self.root)
         trade_window.title("Operar Ação")
         
-        # Labels e campos de entrada
         tk.Label(trade_window, text="Ticker (Ação):").grid(row=0, column=0, padx=5, pady=5)
         entry_ticker = tk.Entry(trade_window)
         entry_ticker.grid(row=0, column=1, padx=5, pady=5)
@@ -140,15 +149,21 @@ class PortfolioGUI:
         entry_price = tk.Entry(trade_window)
         entry_price.grid(row=2, column=1, padx=5, pady=5)
         
-        # Funções para os botões de operação
+        tk.Label(trade_window, text="Data da Operação (dd/mm/yyyy) [opcional]:").grid(row=3, column=0, padx=5, pady=5)
+        entry_data_operacao = tk.Entry(trade_window)
+        entry_data_operacao.grid(row=3, column=1, padx=5, pady=5)
+        
         def buy_action():
             try:
                 ticker = entry_ticker.get().upper().strip()
                 quantity = float(entry_quantity.get())
                 price = float(entry_price.get())
-                self.pm.buy_stock(ticker, quantity, price)
+                manual_date = None
+                if entry_data_operacao.get().strip() != "":
+                    manual_date = datetime.strptime(entry_data_operacao.get().strip(), "%d/%m/%Y")
+                self.pm.buy_stock(ticker, quantity, price, manual_date=manual_date)
                 trade_window.destroy()
-                self.refresh()  # Atualiza a interface principal
+                self.refresh()
             except Exception as e:
                 logging.error(f"Erro ao comprar: {e}")
                 messagebox.showerror("Erro", str(e))
@@ -157,21 +172,22 @@ class PortfolioGUI:
             try:
                 ticker = entry_ticker.get().upper().strip()
                 quantity = float(entry_quantity.get())
-                self.pm.sell_stock(ticker, quantity)
+                manual_date = None
+                if entry_data_operacao.get().strip() != "":
+                    manual_date = datetime.strptime(entry_data_operacao.get().strip(), "%d/%m/%Y")
+                self.pm.sell_stock(ticker, quantity, manual_date=manual_date)
                 trade_window.destroy()
                 self.refresh()
             except Exception as e:
                 logging.error(f"Erro ao vender: {e}")
                 messagebox.showerror("Erro", str(e))
         
-        # Botões Comprar e Vender
         buy_button = tk.Button(trade_window, text="Comprar", command=buy_action)
-        buy_button.grid(row=3, column=0, padx=5, pady=10)
+        buy_button.grid(row=4, column=0, padx=5, pady=10)
         sell_button = tk.Button(trade_window, text="Vender", command=sell_action)
-        sell_button.grid(row=3, column=1, padx=5, pady=10)
+        sell_button.grid(row=4, column=1, padx=5, pady=10)
 
     def atualizar_header(self, total_portfolio, variacao_total, valor_variacao_total, dolar_rate, valor_investido, saldo_restante):
-        """Atualiza os valores do cabeçalho na interface."""
         self.header_tree.item("total", values=("Valor total da carteira (ações + saldo):", f"US$ {total_portfolio:.2f}"))
         var_tag = "positive" if variacao_total >= 0 else "negative"
         self.header_tree.item("variacao", values=("Variação total da carteira:", f"{variacao_total:.2f}%"), tags=(var_tag,))
@@ -190,12 +206,10 @@ class PortfolioGUI:
         self.header_tree.item("dolar", values=("Valor do dólar             :", f"US$ {dolar_rate:.2f}"))
 
     def refresh(self):
-        """Atualiza periodicamente os dados da carteira e a interface."""
         total_portfolio, variacao_total, valor_variacao_total, valor_investido, saldo_restante = self.pm.update_portfolio()
         dolar_rate = self.pm.get_dollar_rate()
         self.atualizar_header(total_portfolio, variacao_total, valor_variacao_total, dolar_rate, valor_investido, saldo_restante)
 
-        # Atualiza a tabela principal
         for item in self.tree.get_children():
             self.tree.delete(item)
         for ticker, dados in self.pm.portfolio.items():
@@ -221,5 +235,4 @@ class PortfolioGUI:
                     f"US$ {dados['custo_medio']:.2f}",
                     "-", "-", "-", "-", "-"
                 ))
-        # Agenda a próxima atualização utilizando o intervalo dinâmico
         self.root.after(self.update_interval_ms, self.refresh)
