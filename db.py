@@ -1,6 +1,8 @@
 # db.py
 from pymongo import MongoClient
-from datetime import datetime
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
+import pandas as pd
 
 def get_mongo_client(uri="mongodb://localhost:27017"):
     return MongoClient(uri)
@@ -44,6 +46,25 @@ def get_portfolio():
                 "custo_medio": doc.get("custo_medio", 0)
             }
     return portfolio
+
+def get_first_purchase_date():
+    """
+    Retorna a data da primeira compra registrada manualmente.
+    Consulta a coleção "transactions" buscando documentos do tipo "compra" 
+    que possuem o campo "data_operacao_manual" e retorna a menor data.
+    """
+    client = get_mongo_client()
+    db = client.portfolio_db
+    # Filtra transações de compra que tenham data_operacao_manual
+    result = db.transactions.find({
+        "tipo": "compra",
+        "data_operacao_manual": {"$exists": True}
+    }).sort("data_operacao_manual", 1).limit(1)
+    first_purchase = list(result)
+    if first_purchase:
+        return first_purchase[0]["data_operacao_manual"]
+    else:
+        return None
 
 def update_portfolio_in_db(portfolio):
     """
@@ -99,3 +120,40 @@ def record_portfolio_history(valor_total, data=None):
         "data": data
     }
     db.portfolio_history.insert_one(history_record)
+
+
+def get_portfolio_history():
+    client = get_mongo_client()
+    db = client.portfolio_db
+    cursor = db.portfolio_history.find({}, {"_id": 0, "data": 1, "valor_total": 1}).sort("data", 1)
+    data = list(cursor)
+    if data:
+        return pd.DataFrame(data)
+    else:
+        return pd.DataFrame(columns=["data", "valor_total"])
+    
+    
+def record_portfolio_history_if_market_closed(total_portfolio):
+    """
+    Registra o valor total da carteira na coleção 'portfolio_history'
+    se o horário atual (em horário de Nova York) for após 16:00 (fechamento da bolsa americana)
+    e se não houver um registro para o dia atual.
+    """
+    # Obtém a data e hora atual no fuso America/New_York
+    now = datetime.now(ZoneInfo("America/New_York"))
+    market_close = time(16, 0, 0)  # 4:00 PM
+    
+    if now.time() < market_close:
+        # Mercado ainda não fechou, não registra.
+        return
+
+    client = get_mongo_client()
+    db = client.portfolio_db
+    # Obtem o último registro (ordenado por data decrescente)
+    last_record = db.portfolio_history.find_one({}, sort=[("data", -1)])
+    today_date = now.date()
+    if (last_record is None) or (last_record["data"].date() < today_date):
+        # Registra um novo histórico para hoje
+        history_record = {"valor_total": total_portfolio, "data": now}
+        db.portfolio_history.insert_one(history_record)
+

@@ -4,38 +4,73 @@ import logging
 from datetime import datetime
 from config import UPDATE_INTERVAL_MS
 from db import update_config_in_db
+import yfinance as yf  # Usado para obter informações para a aba de Análise
 
 class PortfolioGUI:
     """
-    Interface gráfica para exibir a carteira em tempo real.
+    Interface gráfica com duas abas:
+      - "Carteira": exibe os dados da carteira, botões de operação e a tabela de ações.
+      - "Análise": permite pesquisar uma ação e visualizar dados financeiros.
+    Também há botões inferiores para alternar entre as abas.
     """
     def __init__(self, portfolio_manager):
         self.pm = portfolio_manager
         self.root = tk.Tk()
-        self.root.title("Carteira Tempo Real")
-        self.root.geometry("900x600")
-        self.update_interval_ms = UPDATE_INTERVAL_MS  # valor inicial vindo do config
+        self.root.title("Controle de Carteira")
+        self.root.geometry("1200x700")  # Largura e altura ajustadas para acomodar as abas e botões inferiores
+        self.update_interval_ms = UPDATE_INTERVAL_MS
+        self.sorting_state = {}  # para ordenação da tabela
         self.create_widgets()
         self.refresh()
         self.root.mainloop()
 
     def create_widgets(self):
-        """Cria e configura os widgets da interface."""
-        # Cabeçalho com informações resumidas
-        self.header_frame = tk.Frame(self.root)
-        self.header_frame.pack(pady=10)
-        self.header_tree = ttk.Treeview(self.header_frame, columns=("Descricao", "Valor"), show="headings", height=10)
+        # Cria um Notebook para as abas
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True)
+
+        # Aba Carteira (mantém o layout atual)
+        self.tab_carteira = tk.Frame(self.notebook)
+        self.notebook.add(self.tab_carteira, text="Carteira")
+
+        # Aba Análise (nova)
+        self.tab_analise = tk.Frame(self.notebook)
+        self.notebook.add(self.tab_analise, text="Análise")
+
+        # ----- Aba Carteira -----
+        self.create_carteira_widgets(self.tab_carteira)
+
+        # ----- Aba Análise -----
+        self.create_analise_widgets(self.tab_analise)
+
+        # Botões inferiores para alternar entre abas
+        button_frame = tk.Frame(self.root)
+        button_frame.pack(fill="x", pady=5)
+        btn_carteira = tk.Button(button_frame, text="Carteira", command=lambda: self.notebook.select(self.tab_carteira), width=15)
+        btn_carteira.pack(side="left", padx=10)
+        btn_analise = tk.Button(button_frame, text="Análise", command=lambda: self.notebook.select(self.tab_analise), width=15)
+        btn_analise.pack(side="left", padx=10)
+
+    def create_carteira_widgets(self, parent):
+        # Layout original reorganizado para a aba "Carteira"
+        main_frame = tk.Frame(parent)
+        main_frame.pack(fill="both", expand=True)
+
+        # Painel Superior
+        top_frame = tk.Frame(main_frame)
+        top_frame.pack(side="top", fill="x", padx=10, pady=10)
+
+        # Top Esquerdo: Cabeçalho com dados resumidos da carteira
+        top_left = tk.Frame(top_frame)
+        top_left.grid(row=0, column=0, sticky="nsew", padx=5)
+        self.header_tree = ttk.Treeview(top_left, columns=("Descricao", "Valor"), show="headings", height=6)
         self.header_tree.heading("Descricao", text="Descrição")
         self.header_tree.heading("Valor", text="Valor")
-        self.header_tree.column("Descricao", anchor="center", width=300)
-        self.header_tree.column("Valor", anchor="center", width=150)
+        self.header_tree.column("Descricao", anchor="center", width=250)
+        self.header_tree.column("Valor", anchor="center", width=120)
         self.header_tree.pack()
-
-        # Configuração das tags para cores
         self.header_tree.tag_configure("positive", foreground="green")
         self.header_tree.tag_configure("negative", foreground="red")
-
-        # Itens do cabeçalho
         self.header_tree.insert("", "end", iid="total", values=("Valor total da carteira (ações + saldo):", ""))
         self.header_tree.insert("", "end", iid="variacao", values=("Variação total da carteira:", ""))
         self.header_tree.insert("", "end", iid="valor_variacao", values=("Valor da Variação total da carteira:", ""))
@@ -47,26 +82,82 @@ class PortfolioGUI:
         self.header_tree.insert("", "end", iid="variacao_reais", values=("Valor da Variação total investido em Reais    :", ""))
         self.header_tree.insert("", "end", iid="dolar", values=("Valor do dólar             :", ""))
 
-        # Botão de operações (comprar/vender)
-        trade_button = tk.Button(self.root, text="Operar (Comprar/Vender)", command=self.open_trade_window)
-        trade_button.pack(pady=5)
-        
-        # Botão para abrir a janela de configurações
-        config_button = tk.Button(self.root, text="Configurações", command=self.open_config_window)
-        config_button.pack(pady=5)
+        # Top Meio: Botões
+        top_middle = tk.Frame(top_frame)
+        top_middle.grid(row=0, column=1, sticky="nsew", padx=5)
+        trade_button = tk.Button(top_middle, text="Operar (Comprar/Vender)", command=self.open_trade_window, width=20)
+        trade_button.pack(pady=10)
+        config_button = tk.Button(top_middle, text="Configurações", command=self.open_config_window, width=20)
+        config_button.pack(pady=10)
 
-        # Tabela principal da carteira
+        # Top Direito: Painel de Rendimentos
+        top_right = tk.LabelFrame(top_frame, text="Rendimentos", padx=10, pady=10)
+        top_right.grid(row=0, column=2, sticky="nsew", padx=5)
+        self.returns_labels = {}
+        periods = ["Diário", "Semanal", "Mensal", "Trimestral", "Anual"]
+        headers = ["Período", "Rendimento (%)", "Rendimento (US$)", "Rendimento (R$)"]
+        for col, header in enumerate(headers):
+            lbl = tk.Label(top_right, text=header, font=("Arial", 10, "bold"))
+            lbl.grid(row=0, column=col, padx=5, pady=5)
+        for row, period in enumerate(periods, start=1):
+            lbl_period = tk.Label(top_right, text=period)
+            lbl_period.grid(row=row, column=0, padx=5, pady=2)
+            self.returns_labels[period] = {}
+            for col, key in enumerate(["percentual", "us$", "r$"], start=1):
+                lbl_value = tk.Label(top_right, text="0", width=12)
+                lbl_value.grid(row=row, column=col, padx=5, pady=2)
+                self.returns_labels[period][key] = lbl_value
+
+        top_frame.columnconfigure(0, weight=3)
+        top_frame.columnconfigure(1, weight=1)
+        top_frame.columnconfigure(2, weight=3)
+
+        # Painel Inferior: Tabela detalhada de ações
+        bottom_frame = tk.Frame(main_frame)
+        bottom_frame.pack(side="bottom", fill="both", expand=True, padx=10, pady=10)
         columns = ("Ticker", "Quantidade", "Preço Médio", "Custo Médio", "Preço Atual", "Valor Atual", "Variação (%)", "Variação (US$)", "Composição (%)")
-        self.tree = ttk.Treeview(self.root, columns=columns, show="headings", height=15)
+        self.tree = ttk.Treeview(bottom_frame, columns=columns, show="headings", height=12)
         for col in columns:
-            self.tree.heading(col, text=col)
+            self.tree.heading(col, text=col, command=lambda _col=col: self.sort_treeview(_col))
             self.tree.column(col, width=110, anchor="center")
-        self.tree.pack(expand=True, fill="both", padx=20, pady=10)
+        self.tree.pack(expand=True, fill="both")
         self.tree.tag_configure("positive", foreground="green")
         self.tree.tag_configure("negative", foreground="red")
 
+    def create_analise_widgets(self, parent):
+        # Layout simples para a aba de Análise
+        top_frame = tk.Frame(parent)
+        top_frame.pack(fill="x", padx=10, pady=10)
+        tk.Label(top_frame, text="Código da Ação:").pack(side="left", padx=5)
+        self.entry_analise = tk.Entry(top_frame, width=10)
+        self.entry_analise.pack(side="left", padx=5)
+        search_button = tk.Button(top_frame, text="Pesquisar", command=self.search_stock_info)
+        search_button.pack(side="left", padx=5)
+
+        # Tabela para exibir os dados financeiros
+        self.analise_tree = ttk.Treeview(parent, columns=("Campo", "Valor"), show="headings", height=15)
+        self.analise_tree.heading("Campo", text="Campo")
+        self.analise_tree.heading("Valor", text="Valor")
+        self.analise_tree.column("Campo", anchor="center", width=200)
+        self.analise_tree.column("Valor", anchor="center", width=200)
+        self.analise_tree.pack(fill="both", expand=True, padx=10, pady=10)
+
+    def sort_treeview(self, col):
+        items = [(self.tree.set(k, col), k) for k in self.tree.get_children('')]
+        def convert_value(value):
+            if not value or value == "-":
+                return 0
+            clean_value = value.replace("US$", "").replace("R$", "").replace("%", "").strip()
+            try:
+                return float(clean_value)
+            except ValueError:
+                return clean_value
+        items.sort(key=lambda t: convert_value(t[0]), reverse=self.sorting_state.get(col, False))
+        for index, (_, item_id) in enumerate(items):
+            self.tree.move(item_id, '', index)
+        self.sorting_state[col] = not self.sorting_state.get(col, False)
+
     def open_config_window(self):
-        """Abre uma janela para alterar as configurações."""
         config_window = tk.Toplevel(self.root)
         config_window.title("Configurações")
         config_window.grab_set()
@@ -86,13 +177,6 @@ class PortfolioGUI:
         entry_interval.insert(0, str(self.update_interval_ms))
         entry_interval.grid(row=2, column=1, padx=5, pady=5)
 
-        tk.Label(config_window, text="Data de Início da Carteira (dd/mm/yyyy):").grid(row=3, column=0, padx=5, pady=5, sticky="e")
-        entry_data_inicio = tk.Entry(config_window)
-        # Se já houver data definida, formata-a
-        if self.pm.data_inicio:
-            entry_data_inicio.insert(0, self.pm.data_inicio.strftime("%d/%m/%Y"))
-        entry_data_inicio.grid(row=3, column=1, padx=5, pady=5)
-
         def save_config():
             try:
                 novo_valor_usd = float(entry_valor_usd.get())
@@ -102,38 +186,23 @@ class PortfolioGUI:
                 messagebox.showerror("Erro", "Insira valores numéricos válidos.")
                 return
 
-            data_inicio_input = entry_data_inicio.get().strip()
-            if data_inicio_input != "":
-                try:
-                    novo_data_inicio = datetime.strptime(data_inicio_input, "%d/%m/%Y")
-                except ValueError:
-                    messagebox.showerror("Erro", "Data de Início deve estar no formato dd/mm/yyyy.")
-                    return
-            else:
-                novo_data_inicio = None
-
-            # Atualiza as configurações na memória
             self.pm.valor_inicial_total = novo_valor_usd
             self.pm.valor_inicial_total_reais = novo_valor_reais
             self.update_interval_ms = novo_interval
-            self.pm.data_inicio = novo_data_inicio
 
-            # Salva no MongoDB
             new_config = {
                 "valor_inicial_total_usd": novo_valor_usd,
                 "valor_inicial_total_reais": novo_valor_reais,
-                "update_interval_ms": novo_interval,
-                "data_inicio": novo_data_inicio
+                "update_interval_ms": novo_interval
             }
             update_config_in_db(new_config)
             messagebox.showinfo("Sucesso", "Configurações atualizadas!")
             config_window.destroy()
 
         save_button = tk.Button(config_window, text="Salvar", command=save_config)
-        save_button.grid(row=4, column=0, columnspan=2, pady=10)
+        save_button.grid(row=3, column=0, columnspan=2, pady=10)
 
     def open_trade_window(self):
-        """Abre uma janela para operações de compra/venda."""
         trade_window = tk.Toplevel(self.root)
         trade_window.title("Operar Ação")
         
@@ -187,6 +256,50 @@ class PortfolioGUI:
         sell_button = tk.Button(trade_window, text="Vender", command=sell_action)
         sell_button.grid(row=4, column=1, padx=5, pady=10)
 
+    def search_stock_info(self):
+        """Pesquisa dados financeiros para o ticker informado na aba Análise."""
+        ticker = self.entry_analise.get().upper().strip()
+        if not ticker:
+            messagebox.showerror("Erro", "Informe o código da ação.")
+            return
+        try:
+            # Usamos yfinance para obter os dados financeiros (exemplo usando o método .info)
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            # Seleciona alguns campos de interesse para exibição
+            campos = {
+                "previousClose": "Fechamento Anterior",
+                "open": "Abertura",
+                "dayLow": "Mínimo do Dia",
+                "dayHigh": "Máximo do Dia",
+                "volume": "Volume",
+                "marketCap": "Capitalização",
+                "trailingPE": "P/E (Últimos 12M)",
+                "forwardPE": "P/E Futuro",
+                "dividendYield": "Dividend Yield",
+            }
+            # Limpa a tabela da aba de Análise
+            for item in self.analise_tree.get_children():
+                self.analise_tree.delete(item)
+            # Insere os campos e valores na tabela
+            for campo, descricao in campos.items():
+                valor = info.get(campo, "N/A")
+                # Formata valores numéricos
+                if isinstance(valor, float):
+                    valor = f"{valor:,.2f}"
+                self.analise_tree.insert("", "end", values=(descricao, valor))
+        except Exception as e:
+            logging.error(f"Erro ao buscar dados financeiros para {ticker}: {e}")
+            messagebox.showerror("Erro", f"Não foi possível obter dados para {ticker}.")
+
+    def update_returns_widget(self):
+        """Atualiza os valores dos rendimentos exibidos no painel direito."""
+        returns = self.pm.get_returns()
+        for period, data in returns.items():
+            self.returns_labels[period]["percentual"].configure(text=f"{data['percentual']:.2f}%")
+            self.returns_labels[period]["us$"].configure(text=f"US$ {data['us$']:.2f}")
+            self.returns_labels[period]["r$"].configure(text=f"R$ {data['r$']:.2f}")
+
     def atualizar_header(self, total_portfolio, variacao_total, valor_variacao_total, dolar_rate, valor_investido, saldo_restante):
         self.header_tree.item("total", values=("Valor total da carteira (ações + saldo):", f"US$ {total_portfolio:.2f}"))
         var_tag = "positive" if variacao_total >= 0 else "negative"
@@ -235,4 +348,5 @@ class PortfolioGUI:
                     f"US$ {dados['custo_medio']:.2f}",
                     "-", "-", "-", "-", "-"
                 ))
+        self.update_returns_widget()
         self.root.after(self.update_interval_ms, self.refresh)
