@@ -114,7 +114,8 @@ def record_portfolio_history(valor_total, data=None):
     client = get_mongo_client()
     db = client.portfolio_db
     if data is None:
-        data = datetime.now()
+        #data = datetime.now()
+        data = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     history_record = {
         "valor_total": valor_total,
         "data": data

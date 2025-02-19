@@ -18,27 +18,38 @@ class PortfolioManager:
         self.data_inicio = get_first_purchase_date()
         self.market_data_service = market_data_service or MarketDataService()
 
-    def get_dollar_rate(self):
+    def get_dollar_rate(self):    
         try:
-            data = self.market_data_service.get_yfinance_data(["USDBRL=X"])
-            if not data.empty:
-                if isinstance(data.columns, pd.MultiIndex):
-                    return data["USDBRL=X"]["Close"].iloc[-1]
-                else:
-                    return data["Close"].iloc[-1]
+            # Reaproveitamos get_market_data para um único ticker: "USDBRL=X"
             data = self.market_data_service.get_market_data(["USDBRL=X"])
+
+            # Se 'data' for um DataFrame e não estiver vazio:
             if isinstance(data, pd.DataFrame) and not data.empty:
+                # Verifica se é MultiIndex (vários tickers) ou não
                 if isinstance(data.columns, pd.MultiIndex):
-                    return data["USDBRL=X"]["Close"].iloc[-1]
+                    # Checa se 'USDBRL=X' está nas colunas do nível 0
+                    if "USDBRL=X" in data.columns.get_level_values(0):
+                        # Retorna o último valor de Close
+                        return data["USDBRL=X"]["Close"].iloc[-1]
+                    else:
+                        # Caso contrário, pode ser que seja uma única coluna "Close"
+                        return data["Close"].iloc[-1]
                 else:
+                    # Se não for MultiIndex, assumimos que a coluna "Close" é única
                     return data["Close"].iloc[-1]
+
+            # Se 'data' for um dicionário (fallback) e contiver a chave "USDBRL=X":
             elif isinstance(data, dict) and "USDBRL=X" in data:
                 df = data["USDBRL=X"]
                 if not df.empty:
                     return df["Close"].iloc[-1]
+
         except Exception as e:
             logging.error(f"Erro ao obter taxa do dólar: {e}")
+
+        # Se chegou até aqui, retorna valor padrão
         return 5.70
+
 
     def update_portfolio(self):
         total_valor_acoes = 0
@@ -126,8 +137,12 @@ class PortfolioManager:
             data_referencia = hoje - pd.Timedelta(days=dias)
             registros_validos = history[history['data'] <= data_referencia]
             if registros_validos.empty:
-                return 0.0, 0.0, 0.0
-            valor_anterior = registros_validos.iloc[-1]['valor_total']
+                if not history.empty:
+                    valor_anterior = history.iloc[0]['valor_total']  # ou o "último" registro
+                else:
+                    return 0.0, 0.0, 0.0
+            else:    
+                valor_anterior = registros_validos.iloc[-1]['valor_total']
             percentual = ((total_portfolio - valor_anterior) / valor_anterior) * 100 if valor_anterior != 0 else 0.0
             retorno_usd = total_portfolio - valor_anterior
             retorno_br = retorno_usd * dollar_rate
