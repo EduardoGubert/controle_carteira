@@ -23,14 +23,6 @@ class BaseGUI:
         # Armazena as referências às abas
         self.tabs = {}
 
-        # Botões inferiores (simulando planilhas do Excel)
-        # button_frame = tk.Frame(self.root)
-        # button_frame.pack(fill="x", pady=5)
-        # self.btn_carteira = tk.Button(button_frame, text="Carteira", width=15)
-        # self.btn_carteira.pack(side="left", padx=10)
-        # self.btn_analise = tk.Button(button_frame, text="Análise", width=15)
-        # self.btn_analise.pack(side="left", padx=10)
-
     def add_tab(self, tab_obj, title):
         """
         Adiciona uma aba (Frame) ao Notebook.

@@ -4,7 +4,7 @@ import pandas as pd
 import logging
 import requests
 from cachetools import TTLCache, cached
-from db import update_portfolio_in_db, record_transaction, get_first_purchase_date, record_portfolio_history_if_market_closed
+from db import update_portfolio_in_db, record_transaction, get_first_purchase_date, record_portfolio_history_if_market_closed,remove_stock_from_portfolio
 from market_data_service import MarketDataService  # supondo que já esteja implementado
 
 class PortfolioManager:
@@ -20,105 +20,108 @@ class PortfolioManager:
 
     def get_dollar_rate(self):    
         try:
-            # Reaproveitamos get_market_data para um único ticker: "USDBRL=X"
+            logging.info("Tentando obter taxa do dólar")
             data = self.market_data_service.get_market_data(["USDBRL=X"])
+            
+            logging.info(f"Dados recebidos para dólar: {data}")
 
-            # Se 'data' for um DataFrame e não estiver vazio:
             if isinstance(data, pd.DataFrame) and not data.empty:
-                # Verifica se é MultiIndex (vários tickers) ou não
+                # Verifica se é MultiIndex
                 if isinstance(data.columns, pd.MultiIndex):
-                    # Checa se 'USDBRL=X' está nas colunas do nível 0
                     if "USDBRL=X" in data.columns.get_level_values(0):
-                        # Retorna o último valor de Close
-                        return data["USDBRL=X"]["Close"].iloc[-1]
-                    else:
-                        # Caso contrário, pode ser que seja uma única coluna "Close"
-                        return data["Close"].iloc[-1]
-                else:
-                    # Se não for MultiIndex, assumimos que a coluna "Close" é única
-                    return data["Close"].iloc[-1]
+                        rate = data["USDBRL=X"]["Close"].iloc[-1]
+                        logging.info(f"Taxa do dólar obtida (MultiIndex): {rate}")
+                        return rate
+                # Se não for MultiIndex, tenta acessar diretamente
+                elif "Close" in data.columns:
+                    rate = data["Close"].iloc[-1]
+                    logging.info(f"Taxa do dólar obtida (Single Index): {rate}")
+                    return rate
+                elif "USDBRL=X, Close" in data.columns:
+                    rate = data["USDBRL=X, Close"].iloc[-1]
+                    logging.info(f"Taxa do dólar obtida (Column Name): {rate}")
+                    return rate
 
-            # Se 'data' for um dicionário (fallback) e contiver a chave "USDBRL=X":
-            elif isinstance(data, dict) and "USDBRL=X" in data:
-                df = data["USDBRL=X"]
-                if not df.empty:
-                    return df["Close"].iloc[-1]
+            logging.warning("Usando taxa do dólar padrão")
+            return 5.70
 
         except Exception as e:
-            logging.error(f"Erro ao obter taxa do dólar: {e}")
-
-        # Se chegou até aqui, retorna valor padrão
-        return 5.70
+            logging.error(f"Erro ao obter taxa do dólar: {str(e)}\nDataFrame: {data if 'data' in locals() else 'None'}")
+            return 5.70
 
 
     def update_portfolio(self):
+        logging.info("Iniciando atualização do portfolio")
         total_valor_acoes = 0
         total_investido = 0
+        
         tickers = list(self.portfolio.keys())
+        logging.info(f"Tickers a serem atualizados: {tickers}")
+        
         data = self.market_data_service.get_market_data(tickers)
+        logging.info(f"Dados recebidos: {data}")
+        
         if isinstance(data, pd.DataFrame):
-            if isinstance(data.columns, pd.MultiIndex):
-                for ticker in tickers:
-                    if ticker in data.columns.get_level_values(0):
-                        preco_atual = data[ticker]["Close"].iloc[-1]
-                    else:
-                        logging.warning(f"Dados para {ticker} não encontrados.")
-                        continue
-                    self.portfolio[ticker]["preco_atual"] = preco_atual
-                    self.portfolio[ticker]["valor_atual"] = preco_atual * self.portfolio[ticker]["quantidade"]
-                    preco_medio = self.portfolio[ticker]["preco_medio"]
-                    self.portfolio[ticker]["variacao"] = ((preco_atual / preco_medio) - 1) * 100
-                    total_valor_acoes += self.portfolio[ticker]["valor_atual"]
-            else:
-                try:
-                    preco_atual = data["Close"].iloc[-1]
-                    for ticker in tickers:
-                        self.portfolio[ticker]["preco_atual"] = preco_atual
-                        self.portfolio[ticker]["valor_atual"] = preco_atual * self.portfolio[ticker]["quantidade"]
-                        preco_medio = self.portfolio[ticker]["preco_medio"]
-                        self.portfolio[ticker]["variacao"] = ((preco_atual / preco_medio) - 1) * 100
-                        total_valor_acoes += self.portfolio[ticker]["valor_atual"]
-                except Exception as e:
-                    logging.error(f"Erro ao processar dados: {e}")
-        elif isinstance(data, dict):
+            if data.empty:
+                logging.error("DataFrame vazio recebido")
+                return 0, 0, 0, 0, 0
+                
+            logging.info(f"Colunas disponíveis: {data.columns}")
+            
+            # Primeiro, atualiza os preços e valores
             for ticker in tickers:
                 try:
-                    if ticker in data:
-                        preco_atual = data[ticker]["Close"].iloc[-1]
+                    column_name = f"{ticker}, Close"
+                    if column_name in data.columns:
+                        preco_atual = data[column_name].iloc[-1]
+                        logging.info(f"Preço atual para {ticker}: {preco_atual}")
+                        
                         self.portfolio[ticker]["preco_atual"] = preco_atual
                         self.portfolio[ticker]["valor_atual"] = preco_atual * self.portfolio[ticker]["quantidade"]
                         preco_medio = self.portfolio[ticker]["preco_medio"]
                         self.portfolio[ticker]["variacao"] = ((preco_atual / preco_medio) - 1) * 100
+                        
                         total_valor_acoes += self.portfolio[ticker]["valor_atual"]
+                        total_investido += self.portfolio[ticker]["quantidade"] * preco_medio
                     else:
-                        logging.warning(f"Fallback: Dados para {ticker} não encontrados.")
+                        logging.warning(f"Coluna {column_name} não encontrada")
                 except Exception as e:
-                    logging.error(f"Erro ao processar fallback para {ticker}: {e}")
+                    logging.error(f"Erro ao processar {ticker}: {str(e)}")
 
-        for ticker in tickers:
-            total_investido += self.portfolio[ticker].get("custo_medio", 0)
-        saldo_restante = self.valor_inicial_total - total_investido
-        total_portfolio = total_valor_acoes + saldo_restante
+            # Calcula o valor total do portfolio (incluindo saldo)
+            saldo_restante = self.valor_inicial_total - total_investido
+            total_portfolio = total_valor_acoes + saldo_restante
 
-        for ticker in tickers:
-            if "valor_atual" in self.portfolio[ticker]:
-                self.portfolio[ticker]["composicao"] = (self.portfolio[ticker]["valor_atual"] / total_portfolio) * 100
+            # Depois, calcula a composição para cada ativo
+            for ticker in tickers:
+                if "valor_atual" in self.portfolio[ticker]:
+                    self.portfolio[ticker]["composicao"] = (self.portfolio[ticker]["valor_atual"] / total_valor_acoes) * 100 if total_valor_acoes > 0 else 0
+                    logging.info(f"Composição calculada para {ticker}: {self.portfolio[ticker]['composicao']}%")
 
-        variacao_total = ((total_portfolio - self.valor_inicial_total) / self.valor_inicial_total) * 100
-        valor_variacao_total = total_portfolio - self.valor_inicial_total
+            variacao_total = ((total_portfolio / self.valor_inicial_total) - 1) * 100 if self.valor_inicial_total > 0 else 0
+            valor_variacao_total = total_portfolio - self.valor_inicial_total
+            valor_total_acoes_saldo = total_valor_acoes + saldo_restante
+            logging.info(f"""
+            Resultados da atualização:
+            Total valor ações: {total_valor_acoes}
+            Total portfolio: {total_portfolio}
+            Variação total: {variacao_total}
+            Valor variação total: {valor_variacao_total}
+            Total investido: {total_investido}
+            Saldo restante: {saldo_restante}
+            """)
 
-        # Registra o histórico se o mercado já fechou
-        from db import record_portfolio_history_if_market_closed
-        record_portfolio_history_if_market_closed(total_portfolio)
-
-        return total_portfolio, variacao_total, valor_variacao_total, total_investido, saldo_restante
+            return valor_total_acoes_saldo, total_portfolio, variacao_total, valor_variacao_total, total_investido, saldo_restante
+        else:
+            logging.error(f"Tipo de dados inesperado: {type(data)}")
+            return 0, 0, 0, 0, 0
 
     def get_returns(self):
         """
         Calcula os rendimentos para os períodos: Diário, Semanal, Mensal, Trimestral e Anual,
         com base nos dados históricos da coleção 'portfolio_history'.
         """
-        total_portfolio, _, _, _, _ = self.update_portfolio()
+        valor_total_acoes_saldo, _, _, _, _, _ = self.update_portfolio()
         dollar_rate = self.get_dollar_rate()
         from db import get_portfolio_history
         history = get_portfolio_history()
@@ -143,8 +146,8 @@ class PortfolioManager:
                     return 0.0, 0.0, 0.0
             else:    
                 valor_anterior = registros_validos.iloc[-1]['valor_total']
-            percentual = ((total_portfolio - valor_anterior) / valor_anterior) * 100 if valor_anterior != 0 else 0.0
-            retorno_usd = total_portfolio - valor_anterior
+            percentual = ((valor_total_acoes_saldo - valor_anterior) / valor_anterior) * 100 if valor_anterior != 0 else 0.0
+            retorno_usd = valor_total_acoes_saldo - valor_anterior
             retorno_br = retorno_usd * dollar_rate
             return percentual, retorno_usd, retorno_br
 
@@ -191,7 +194,7 @@ class PortfolioManager:
             transaction["data_operacao_manual"] = manual_date
         record_transaction(transaction)
 
-    def sell_stock(self, ticker, quantity, manual_date=None):
+    def sell_stock(self, ticker, quantity, price, manual_date=None):
         ticker = ticker.upper().strip()
         if ticker not in self.portfolio:
             raise ValueError("Ticker não encontrado na carteira")
@@ -201,6 +204,7 @@ class PortfolioManager:
             raise ValueError("Quantidade para vender maior que a disponível")
         elif quantity == old_quantity:
             del self.portfolio[ticker]
+            remove_stock_from_portfolio(ticker)
             logging.info(f"Venda completa: {ticker} removido da carteira.")
             observacao = "Zeragem de posição"
         else:
@@ -218,7 +222,7 @@ class PortfolioManager:
             "ticker": ticker,
             "tipo": "venda",
             "quantidade": quantity,
-            "preco": None,
+            "preco": price,
             "observacao": observacao
         }
         if manual_date is not None:

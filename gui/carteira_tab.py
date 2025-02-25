@@ -29,7 +29,7 @@ class CarteiraTab(tk.Frame):
         # Top Esquerdo: Cabeçalho
         top_left = tk.Frame(top_frame)
         top_left.grid(row=0, column=0, sticky="nsew", padx=5)
-        self.header_tree = ttk.Treeview(top_left, columns=("Descricao", "Valor"), show="headings", height=6)
+        self.header_tree = ttk.Treeview(top_left, columns=("Descricao", "Valor"), show="headings", height=11)
         self.header_tree.heading("Descricao", text="Descrição")
         self.header_tree.heading("Valor", text="Valor")
         self.header_tree.column("Descricao", anchor="center", width=250)
@@ -130,10 +130,11 @@ class CarteiraTab(tk.Frame):
             try:
                 ticker = entry_ticker.get().upper().strip()
                 quantity = float(entry_quantity.get())
+                price = float(entry_price.get())
                 manual_date = None
                 if entry_data_operacao.get().strip() != "":
                     manual_date = datetime.strptime(entry_data_operacao.get().strip(), "%d/%m/%Y")
-                self.pm.sell_stock(ticker, quantity, manual_date=manual_date)
+                self.pm.sell_stock(ticker, quantity, price, manual_date=manual_date)
                 trade_window.destroy()
                 self.refresh()
             except Exception as e:
@@ -207,9 +208,9 @@ class CarteiraTab(tk.Frame):
         self.sorting_state[col] = not self.sorting_state.get(col, False)
 
     def refresh(self):
-        total_portfolio, variacao_total, valor_variacao_total, valor_investido, saldo_restante = self.pm.update_portfolio()
+        total_portfolio_saldo, total_portfolio, variacao_total, valor_variacao_total, valor_investido, saldo_restante = self.pm.update_portfolio()
         dolar_rate = self.pm.get_dollar_rate()
-        self.atualizar_header(total_portfolio, variacao_total, valor_variacao_total, dolar_rate, valor_investido, saldo_restante)
+        self.atualizar_header(total_portfolio_saldo, total_portfolio, variacao_total, valor_variacao_total, dolar_rate, valor_investido, saldo_restante)
 
         # Limpa a tabela de ações
         for item in self.tree.get_children():
@@ -249,8 +250,9 @@ class CarteiraTab(tk.Frame):
             self.returns_labels[period]["us$"].configure(text=f"US$ {data['us$']:.2f}")
             self.returns_labels[period]["r$"].configure(text=f"R$ {data['r$']:.2f}")
 
-    def atualizar_header(self, total_portfolio, variacao_total, valor_variacao_total, dolar_rate, valor_investido, saldo_restante):
-        self.header_tree.item("total", values=("Valor total da carteira (ações + saldo):", f"US$ {total_portfolio:.2f}"))
+    def atualizar_header(self, total_portfolio_saldo, total_portfolio,variacao_total, valor_variacao_total, dolar_rate, valor_investido, saldo_restante):
+        self.header_tree.item("total", values=("Valor total da carteira (ações + saldo):", f"US$ {total_portfolio_saldo:.2f}"))
+        self.header_tree.item("total", values=("Valor total da carteira (ações):", f"US$ {total_portfolio:.2f}"))
         var_tag = "positive" if variacao_total >= 0 else "negative"
         self.header_tree.item("variacao", values=("Variação total da carteira:", f"{variacao_total:.2f}%"), tags=(var_tag,))
         var_val_tag = "positive" if valor_variacao_total >= 0 else "negative"

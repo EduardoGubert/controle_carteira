@@ -7,17 +7,21 @@ from datetime import datetime
 
 class AnaliseTab(tk.Frame):
     """
-    Aba de Análise: permite pesquisar uma ação e exibir dados financeiros.
+    Aba de Análise com 4 colunas na parte inferior:
+      1) Quarterly EPS & Sales
+      2) Yearly EPS
+      3) Ratings / Indicadores
+      4) Campos Avançados (roic, margin, etc.)
     """
     def __init__(self, parent, pm):
         super().__init__(parent)
-        self.pm = pm  # Referência ao PortfolioManager, que tem market_data_service
+        self.pm = pm  # Referência ao PortfolioManager
         self.create_widgets()
 
     def create_widgets(self):
-        # Frame superior: campo de texto + botão pesquisar
+        # -------------------- Frame Superior: entrada + botão pesquisar --------------------
         top_frame = tk.Frame(self)
-        top_frame.pack(fill="x", padx=10, pady=10)
+        top_frame.pack(fill="x", padx=10, pady=5)
 
         tk.Label(top_frame, text="Código da Ação:").pack(side="left", padx=5)
         self.entry_analise = tk.Entry(top_frame, width=10)
@@ -26,100 +30,127 @@ class AnaliseTab(tk.Frame):
         search_button = tk.Button(top_frame, text="Pesquisar", command=self.search_stock_info)
         search_button.pack(side="left", padx=5)
 
-        # Frame intermediário: duas TreeViews (básico e avançado)
-        middle_frame = tk.Frame(self)
-        middle_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        # -------------------- Frame Principal para as 4 partes --------------------
+        bottom_frame = tk.Frame(self)
+        bottom_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # ----- Tabela 1: Dados básicos -----
-        basic_label = tk.Label(middle_frame, text="Dados de Mercado (Básico)", font=("Arial", 11, "bold"))
-        basic_label.pack(pady=5)
-        
-        self.basic_tree = ttk.Treeview(middle_frame, columns=("Campo", "Valor"), show="headings", height=10)
-        self.basic_tree.heading("Campo", text="Campo")
-        self.basic_tree.heading("Valor", text="Valor")
-        self.basic_tree.column("Campo", anchor="center", width=200)
-        self.basic_tree.column("Valor", anchor="center", width=200)
-        self.basic_tree.pack(fill="x", expand=False, padx=5, pady=5)
+        # Configuramos 4 colunas, 1 linha
+        for col_index in range(4):
+            bottom_frame.grid_columnconfigure(col_index, weight=1)
 
-        # ----- Tabela 2: Dados Avançados -----
-        advanced_label = tk.Label(middle_frame, text="Indicadores Fundamentalistas (Avançado)", font=("Arial", 11, "bold"))
-        advanced_label.pack(pady=5)
+        # ========== 1) Quarterly EPS & Sales ==========
+        quarterly_label = tk.Label(bottom_frame, text="Quarterly EPS & Sales", font=("Arial", 11, "bold"))
+        quarterly_label.grid(row=0, column=0, sticky="n", padx=5, pady=5)
 
-        self.advanced_tree = ttk.Treeview(middle_frame, columns=("Campo", "Valor"), show="headings", height=10)
+        columns_quarterly = ("Quarter", "EPS($)", "%ChgEPS", "Sales($Mil)", "%ChgSales")
+        self.quarterly_tree = ttk.Treeview(bottom_frame, columns=columns_quarterly, show="headings", height=14)
+        for col in columns_quarterly:
+            self.quarterly_tree.heading(col, text=col)
+            self.quarterly_tree.column(col, anchor="center", width=90)
+        self.quarterly_tree.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+
+        # ========== 2) Yearly EPS ==========
+        yearly_label = tk.Label(bottom_frame, text="Yearly EPS", font=("Arial", 11, "bold"))
+        yearly_label.grid(row=0, column=1, sticky="n", padx=5, pady=5)
+
+        columns_yearly = ("Year (Dec)", "EPS($)", "%Chg")
+        self.yearly_tree = ttk.Treeview(bottom_frame, columns=columns_yearly, show="headings", height=14)
+        for col in columns_yearly:
+            self.yearly_tree.heading(col, text=col)
+            self.yearly_tree.column(col, anchor="center", width=80)
+        self.yearly_tree.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
+
+        # ========== 3) Ratings e Outros Indicadores ==========
+        ratings_label = tk.Label(bottom_frame, text="Ratings / Indicadores", font=("Arial", 11, "bold"))
+        ratings_label.grid(row=0, column=2, sticky="n", padx=5, pady=5)
+
+        columns_ratings = ("Campo", "Valor")
+        self.ratings_tree = ttk.Treeview(bottom_frame, columns=columns_ratings, show="headings", height=14)
+        self.ratings_tree.heading("Campo", text="Campo")
+        self.ratings_tree.heading("Valor", text="Valor")
+        self.ratings_tree.column("Campo", anchor="w", width=140)
+        self.ratings_tree.column("Valor", anchor="center", width=140)
+        self.ratings_tree.grid(row=1, column=2, sticky="nsew", padx=5, pady=5)
+
+        # ========== 4) Campos Avançados (roic, margin, etc.) ==========
+        advanced_label = tk.Label(bottom_frame, text="Campos Avançados", font=("Arial", 11, "bold"))
+        advanced_label.grid(row=0, column=3, sticky="n", padx=5, pady=5)
+
+        self.advanced_tree = ttk.Treeview(bottom_frame, columns=("Campo", "Valor"), show="headings", height=14)
         self.advanced_tree.heading("Campo", text="Campo")
         self.advanced_tree.heading("Valor", text="Valor")
-        self.advanced_tree.column("Campo", anchor="center", width=200)
-        self.advanced_tree.column("Valor", anchor="center", width=200)
-        self.advanced_tree.pack(fill="x", expand=False, padx=5, pady=5)
+        self.advanced_tree.column("Campo", anchor="w", width=150)
+        self.advanced_tree.column("Valor", anchor="center", width=150)
+        self.advanced_tree.grid(row=1, column=3, sticky="nsew", padx=5, pady=5)
 
-        # Tabela 3 (opcional): EPS x Sales (3 últimos anos / trimestres)
-        # Se desejar outra tabela para EPS / SALES, etc., crie aqui.
 
     def search_stock_info(self):
+        """
+        Método chamado ao clicar em 'Pesquisar'.
+        Busca e exibe todos os dados disponíveis para o ticker.
+        """
         ticker = self.entry_analise.get().upper().strip()
         if not ticker:
             messagebox.showerror("Erro", "Informe o código da ação.")
             return
 
-        # 1) Define campos básicos (já existentes)
-        campos_basicos = {
-            "previousClose": "Fech. Anterior",
-            "open": "Abertura",
-            "dayLow": "Mínimo do Dia",
-            "dayHigh": "Máximo do Dia",
-            "volume": "Volume",
-            "marketCap": "Market Cap",
-            "trailingPE": "P/E (Últ. 12m)",
-            "forwardPE": "P/E Futuro",
-            "dividendYield": "Dividend Yield",
-        }
-
-        # 2) Define campos avançados
-        campos_avancados = {
-            "peRatio": "P/E Ratio",  # yfinance 'info' might have "trailingPE" ou algo similar
-            "grossMargins": "Margem Bruta",  # Em yfinance: info['grossMargins']
-            "profitMargins": "Margem de Lucro",  # Em yfinance: info['profitMargins']
-            "roic": "ROIC",  # raramente presente direto em yfinance
-            "returnOnEquity": "ROE",  # yfinance: info['returnOnEquity'] (talvez)
-            # Abaixo, normalmente não constam em yfinance .info:
-            "roe15years": "ROE (Últ. 15 anos)",
-            "revenueGrowth": "Cresc. de Receita Anual",
-            "netIncomeGrowth": "Cresc. de Lucro Anual",
-            "ocfNetIncomeRatio": "Operating Cash Flow / Net Income",
-            "netDebtEbitda": "Net Debt / EBITDA",
-            "insiderOwnership": "INSIDER OWNERSHIP",
-            "capexSales": "CAPEX / SALES",
-            "capexOCF": "CAPEX / OPERATING CASH FLOW",
-            "returnOfEquity": "RETURN OF EQUITY",  # se for algo distinto de 'returnOnEquity'
-        }
-
         try:
-            # 3) Busca dados básicos
-            dados_basicos = self.pm.market_data_service.get_fundamental_data(ticker, campos_basicos)
+            # Limpa todas as tabelas antes de inserir novos dados
+            for tree in [self.quarterly_tree, self.yearly_tree, self.ratings_tree, self.advanced_tree]:
+                for item in tree.get_children():
+                    tree.delete(item)
 
-            # 4) Busca dados avançados
-            dados_avancados = self.pm.market_data_service.get_fundamental_data(ticker, campos_avancados)
+            logging.info(f"Buscando dados para {ticker}")
 
-            # Limpa as TreeViews
-            for item in self.basic_tree.get_children():
-                self.basic_tree.delete(item)
-            for item in self.advanced_tree.get_children():
-                self.advanced_tree.delete(item)
+            # 1. Buscar e preencher dados trimestrais
+            quarterly_data = self.pm.market_data_service.get_quarterly_data(ticker)
+            for row in quarterly_data:
+                self.quarterly_tree.insert("", "end", values=row)
+            logging.info(f"Dados trimestrais obtidos: {len(quarterly_data)} registros")
 
-            # Preenche Tabela de dados básicos
-            for campo, label in campos_basicos.items():
-                valor = dados_basicos.get(campo, "N/A")
-                if isinstance(valor, float):
-                    valor = f"{valor:,.2f}"
-                self.basic_tree.insert("", "end", values=(label, valor))
+            # 2. Buscar e preencher dados anuais
+            yearly_data = self.pm.market_data_service.get_yearly_data(ticker)
+            for row in yearly_data:
+                self.yearly_tree.insert("", "end", values=row)
+            logging.info(f"Dados anuais obtidos: {len(yearly_data)} registros")
 
-            # Preenche Tabela de dados avançados
+            # 3. Buscar e preencher ratings
+            ratings_data = self.pm.market_data_service.get_ratings_data(ticker)
+            for row in ratings_data:
+                self.ratings_tree.insert("", "end", values=row)
+            logging.info(f"Dados de ratings obtidos: {len(ratings_data)} registros")
+
+            # 4. Buscar e preencher dados fundamentais avançados
+            campos_avancados = {
+                "peRatio": "P/E Ratio",
+                "grossMargins": "Margem Bruta",
+                "profitMargins": "Margem de Lucro",
+                "roic": "ROIC",
+                "returnOnEquity": "ROE",
+                "roe15years": "ROE (Últ. 15 anos)",
+                "revenueGrowth": "Cresc. de Receita Anual",
+                "netIncomeGrowth": "Cresc. de Lucro Anual",
+                "ocfNetIncomeRatio": "Operating Cash Flow / Net Income",
+                "netDebtEbitda": "Net Debt / EBITDA",
+                "insiderOwnership": "INSIDER OWNERSHIP",
+                "capexSales": "CAPEX / SALES",
+                "capexOCF": "CAPEX / OPERATING CASH FLOW",
+                "returnOfEquity": "RETURN OF EQUITY",
+            }
+
+            advanced_data = self.pm.market_data_service.get_fundamental_data(ticker, campos_avancados)
+            
             for campo, label in campos_avancados.items():
-                valor = dados_avancados.get(campo, "N/A")
+                valor = advanced_data.get(campo, "N/A")
                 if isinstance(valor, float):
-                    valor = f"{valor:,.2f}"
+                    if campo in ["grossMargins", "profitMargins", "returnOnEquity", "roic"]:
+                        valor = f"{valor * 100:.2f}%"  # Converte para porcentagem
+                    else:
+                        valor = f"{valor:.2f}"
                 self.advanced_tree.insert("", "end", values=(label, valor))
+            
+            logging.info(f"Dados fundamentais avançados obtidos com sucesso")
 
         except Exception as e:
             logging.error(f"Erro ao buscar dados para {ticker}: {e}")
-            messagebox.showerror("Erro", f"Não foi possível obter dados para {ticker}.")
+            messagebox.showerror("Erro", f"Não foi possível obter dados para {ticker}.\nErro: {str(e)}")

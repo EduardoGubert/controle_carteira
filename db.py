@@ -106,6 +106,16 @@ def record_transaction(transaction):
         transaction["data_operacao_manual"] = transaction["data_registro"]
     db.transactions.insert_one(transaction)
 
+
+
+def remove_stock_from_portfolio(ticker):
+    """
+    Remove a ação zerada da coleção "portfolio"..
+    """
+    client = get_mongo_client()
+    db = client.portfolio_db
+    db.portfolio.delete_one({"ticker": ticker})
+
 def record_portfolio_history(valor_total, data=None):
     """
     Registra o valor total da carteira na coleção "portfolio_history".

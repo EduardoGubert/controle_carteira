@@ -1,4 +1,15 @@
 # main.py
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('portfolio.log')
+    ]
+)
+
 
 from config import portfolio, VALOR_INICIAL_TOTAL_USD, VALOR_INICIAL_TOTAL_REAIS
 from portfolio_manager import PortfolioManager
@@ -19,6 +30,8 @@ def main():
     # Adiciona ao Notebook
     gui.add_tab(carteira_tab, "Carteira")
     gui.add_tab(analise_tab, "Análise") 
+
+ 
 
     gui.run()
 
